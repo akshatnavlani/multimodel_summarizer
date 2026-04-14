@@ -1,0 +1,51 @@
+# Core
+numpy
+pandas
+tqdm
+python-dotenv
+
+# PDF Processing
+pymupdf
+pdfplumber
+
+# OCR
+paddleocr
+paddlepaddle
+pytesseract
+
+# Vision + Models
+transformers
+accelerate
+bitsandbytes
+sentence-transformers
+
+# Detectron2 (install separately in Colab if needed)
+# pip install 'git+https://github.com/facebookresearch/detectron2.git'
+
+# Layout + Image
+opencv-python
+Pillow
+
+# Retrieval
+faiss-cpu
+
+# XAI
+shap
+lime
+captum
+
+# Evaluation
+bert-score
+evaluate
+rouge-score
+
+# Visualization
+matplotlib
+seaborn
+
+# UI
+gradio
+
+# Utilities
+scikit-learn
+scipy

@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environments
+venv/
+env/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Data (VERY IMPORTANT)
+data/raw_pdfs/
+data/extracted/
+data/figures/
+data/tables/
+data/embeddings/
+data/summaries/
+data/xai_outputs/
+
+# Logs
+*.log
+
+# Jupyter
+.ipynb_checkpoints/
+
+# Secrets
+.env

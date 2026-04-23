@@ -52,6 +52,26 @@ _blip2_processor = None
 _blip2_model     = None
 _device          = None
 
+os.environ.setdefault(
+    "PYTORCH_CUDA_ALLOC_CONF",
+    "expandable_segments:True,garbage_collection_threshold:0.8,max_split_size_mb:128",
+)
+
+VISION_DEBUG_LOG = os.environ.get("VISION_DEBUG_LOG", "1").lower() in ("1", "true", "yes")
+
+
+def _vision_debug(event: str, **payload) -> None:
+    if not VISION_DEBUG_LOG:
+        return
+    try:
+        logs_dir = _get_paths()["logs"]
+        log_file = logs_dir / "vision_debug.jsonl"
+        row = {"ts": round(time.time(), 3), "event": event, **payload}
+        with log_file.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(row, ensure_ascii=False) + "\n")
+    except Exception:
+        pass
+
 
 # ---------------------------------------------------------------------------
 # Internal helpers
@@ -129,45 +149,87 @@ def _load_blip2(device: str, model_cache_dir: str) -> Tuple[Any, Any, str]:
         logger.info("[figure_understander] BLIP-2 already loaded — reusing.")
         return _blip2_processor, _blip2_model, _device
 
-    from transformers import Blip2Processor, Blip2ForConditionalGeneration
-
+    model = None
+    processor = None
     MODEL_ID = "Salesforce/blip2-opt-2.7b"
-    logger.info("[figure_understander] Loading BLIP-2 (%s) on %s …", MODEL_ID, device)
 
-    processor = Blip2Processor.from_pretrained(
-        MODEL_ID,
-        cache_dir=model_cache_dir,
-    )
+    try:
+        from transformers import Blip2Processor, Blip2ForConditionalGeneration
 
-    if device == "cuda":
-        try:
+        logger.info("[figure_understander] Loading BLIP-2 (%s) on %s …", MODEL_ID, device)
+        processor = Blip2Processor.from_pretrained(MODEL_ID, cache_dir=model_cache_dir)
+
+        if device == "cuda":
+            import torch
+            min_free_gb = float(os.environ.get("GPU_MIN_FREE_GB_FOR_VISION", "0.8"))
+            try:
+                free_b, total_b = torch.cuda.mem_get_info()
+                free_gb = free_b / (1024 ** 3)
+                total_gb = total_b / (1024 ** 3)
+                logger.info(
+                    "[figure_understander] CUDA free %.2f/%.2f GB before BLIP-2 load.",
+                    free_gb,
+                    total_gb,
+                )
+                _vision_debug("vision.cuda_mem", free_gb=round(free_gb, 3), total_gb=round(total_gb, 3))
+                if free_gb < min_free_gb:
+                    raise RuntimeError(
+                        f"CUDA memory too low for BLIP-2 (free={free_gb:.2f}GB < min={min_free_gb:.2f}GB)"
+                    )
+            except RuntimeError:
+                raise
+            except Exception as e:
+                logger.warning("[figure_understander] CUDA memory probe failed: %s", e)
+
+            try:
+                model = Blip2ForConditionalGeneration.from_pretrained(
+                    MODEL_ID,
+                    load_in_8bit=True,
+                    device_map="auto",
+                    low_cpu_mem_usage=True,
+                    cache_dir=model_cache_dir,
+                )
+                _vision_debug("vision.model_loaded", model=MODEL_ID, mode="gpu-8bit")
+            except Exception as e:
+                logger.warning("[figure_understander] 8-bit load failed (%s) — trying fp16.", e)
+                model = Blip2ForConditionalGeneration.from_pretrained(
+                    MODEL_ID,
+                    torch_dtype=torch.float16,
+                    low_cpu_mem_usage=True,
+                    cache_dir=model_cache_dir,
+                ).to(device)
+                _vision_debug("vision.model_loaded", model=MODEL_ID, mode="gpu-fp16")
+        else:
             import torch
             model = Blip2ForConditionalGeneration.from_pretrained(
                 MODEL_ID,
-                load_in_8bit=True,
-                device_map="auto",
+                torch_dtype=torch.float32,
                 cache_dir=model_cache_dir,
             )
-            logger.info("[figure_understander] BLIP-2 loaded in 8-bit on GPU.")
-        except Exception as e:
-            logger.warning(
-                "[figure_understander] 8-bit load failed (%s) — falling back to fp16.", e
-            )
+            model.eval()
+            _vision_debug("vision.model_loaded", model=MODEL_ID, mode="cpu-fp32")
+    except Exception as e:
+        logger.warning("[figure_understander] BLIP-2 unavailable (%s) — using BLIP fallback.", e)
+        _vision_debug("vision.model_fallback", primary=MODEL_ID, reason=str(e)[:220])
+        from transformers import BlipProcessor, BlipForConditionalGeneration
+        fallback_model = os.environ.get("BLIP_FALLBACK_MODEL_ID", "Salesforce/blip-image-captioning-large")
+        processor = BlipProcessor.from_pretrained(fallback_model, cache_dir=model_cache_dir)
+        if device == "cuda":
             import torch
-            model = Blip2ForConditionalGeneration.from_pretrained(
-                MODEL_ID,
+            model = BlipForConditionalGeneration.from_pretrained(
+                fallback_model,
                 torch_dtype=torch.float16,
                 cache_dir=model_cache_dir,
             ).to(device)
-    else:
-        import torch
-        model = Blip2ForConditionalGeneration.from_pretrained(
-            MODEL_ID,
-            torch_dtype=torch.float32,
-            cache_dir=model_cache_dir,
-        )
-        model.eval()
-        logger.info("[figure_understander] BLIP-2 loaded in fp32 on CPU.")
+            _vision_debug("vision.model_loaded", model=fallback_model, mode="gpu-fp16")
+        else:
+            model = BlipForConditionalGeneration.from_pretrained(
+                fallback_model,
+                cache_dir=model_cache_dir,
+            )
+            model.eval()
+            _vision_debug("vision.model_loaded", model=fallback_model, mode="cpu-fp32")
+        MODEL_ID = fallback_model
 
     _blip2_processor = processor
     _blip2_model     = model

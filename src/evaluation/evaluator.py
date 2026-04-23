@@ -70,7 +70,7 @@ def _error_response(message: str) -> Dict[str, Any]:
 
 
 def _eval_cache_path(paper_id: str, base_paths: Dict[str, Path]) -> Path:
-    eval_dir = base_paths.get("evaluation", base_paths["root"] / "evaluation" / "results")
+    eval_dir = base_paths.get("evaluation", base_paths["root"] / "data" / "evaluation")
     eval_dir.mkdir(parents=True, exist_ok=True)
     return eval_dir / f"{paper_id}_eval.json"
 

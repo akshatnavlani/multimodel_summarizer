@@ -74,6 +74,13 @@ def _build_path_map(root: Path) -> Dict[str, Path]:
     No directory is created here; creation is handled separately.
     """
     data = root / "data"
+    evaluation = data / "evaluation"
+    extracted = data / "extracted"
+    figures = data / "figures"
+    tables = data / "tables"
+    embeddings = data / "embeddings"
+    summaries = data / "summaries"
+    xai_outputs = data / "xai_outputs"
 
     return {
         # ── Project root ────────────────────────────────────────────────
@@ -88,23 +95,23 @@ def _build_path_map(root: Path) -> Dict[str, Path]:
         # ── Data subtree ────────────────────────────────────────────────
         "data": data,
         "raw_pdfs": data / "raw_pdfs",
-        "extracted": data / "extracted",
-        "figures": data / "figures",
-        "tables": data / "tables",
-        "embeddings": data / "embeddings",
-        "summaries": data / "summaries",
-        "xai_outputs": data / "xai_outputs",
+        "extracted": extracted,
+        "figures": figures,
+        "tables": tables,
+        "embeddings": embeddings,
+        "summaries": summaries,
+        "xai_outputs": xai_outputs,
 
         # ── XAI sub-directories ──────────────────────────────────────────
-        "attention_maps": data / "xai_outputs" / "attention_maps",
-        "shap_outputs": data / "xai_outputs" / "shap",
-        "lime_outputs": data / "xai_outputs" / "lime",
-        "mcr_outputs": data / "xai_outputs" / "mcr",
+        "attention_maps": xai_outputs / "attention_maps",
+        "shap_outputs": xai_outputs / "shap",
+        "lime_outputs": xai_outputs / "lime",
+        "mcr_outputs": xai_outputs / "mcr",
 
         # ── Evaluation ──────────────────────────────────────────────────
-        "evaluation": root / "evaluation",
-        "results": root / "evaluation" / "results",
-        "reports": root / "evaluation" / "reports",
+        "evaluation": evaluation,
+        "results": evaluation / "results",
+        "reports": evaluation / "reports",
 
         # ── Logs ────────────────────────────────────────────────────────
         "logs": root / "logs",
@@ -176,14 +183,16 @@ def get_paper_paths(paper_id: str, base_paths: Dict[str, Path]) -> Dict[str, Pat
         "pages_dir": base_paths["extracted"] / pid / "pages",  # page PNGs
 
         # ── Layout ──────────────────────────────────────────────────────
-        "layout": base_paths["extracted"] / f"{pid}_layout.json",
+        "layout_json": base_paths["extracted"] / f"layout_{pid}.json",
+        "layout": base_paths["extracted"] / f"layout_{pid}.json",  # alias
 
         # ── Text / OCR ───────────────────────────────────────────────────
-        "text_elements": base_paths["extracted"] / f"{pid}_text.json",
+        "text_json": base_paths["extracted"] / f"text_{pid}.json",
+        "text_elements": base_paths["extracted"] / f"text_{pid}.json",  # alias
 
         # ── Tables ──────────────────────────────────────────────────────
         "tables_dir": base_paths["tables"] / pid,
-        "tables_json": base_paths["tables"] / f"{pid}_tables.json",
+        "tables_json": base_paths["extracted"] / f"tables_{pid}.json",
 
         # ── Figures ──────────────────────────────────────────────────────
         "figures_dir": base_paths["figures"] / pid,

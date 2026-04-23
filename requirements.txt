@@ -1,51 +1,59 @@
-# Core
-numpy
-pandas
-tqdm
-python-dotenv
+# =============================================================================
+# requirements.txt — Multimodal Summarization + XAI Pipeline
+# Python 3.10 / 3.11 recommended (torch/transformers may not support 3.14+)
+# Install: pip install -r requirements.txt
+# =============================================================================
 
-# PDF Processing
-pymupdf
-pdfplumber
+# ── Core ─────────────────────────────────────────────────────────────────────
+numpy>=1.24,<2.0
+pandas>=2.0
+tqdm>=4.65
+python-dotenv>=1.0
+scipy>=1.11
+scikit-learn>=1.3
 
-# OCR
-paddleocr
-paddlepaddle
-pytesseract
+# ── PDF Processing ────────────────────────────────────────────────────────────
+pymupdf>=1.23          # fitz — layout, image extraction
+pdfplumber>=0.10       # table extraction from PDFs
 
-# Vision + Models
-transformers
-accelerate
-bitsandbytes
-sentence-transformers
+# ── OCR ───────────────────────────────────────────────────────────────────────
+pytesseract>=0.3.10    # Tesseract wrapper (needs system Tesseract installed)
+Pillow>=10.0
 
-# Detectron2 (install separately in Colab if needed)
-# pip install 'git+https://github.com/facebookresearch/detectron2.git'
+# ── Embeddings & Retrieval ────────────────────────────────────────────────────
+sentence-transformers>=2.6
+faiss-cpu>=1.7         # Use faiss-gpu if CUDA is available
 
-# Layout + Image
-opencv-python
-Pillow
+# ── Deep Learning (CPU) ───────────────────────────────────────────────────────
+# For CUDA/GPU: run setup_env.ps1 or see README for GPU-specific torch install
+torch>=2.1
+torchvision>=0.16
+transformers>=4.38
+accelerate>=0.27
+sentencepiece>=0.1.99
 
-# Retrieval
-faiss-cpu
+# ── LLM APIs ─────────────────────────────────────────────────────────────────
+google-generativeai>=0.5   # Gemini 1.5 Flash
+groq>=0.5                  # Groq Mixtral fallback
 
-# XAI
-shap
-lime
-captum
+# ── Evaluation Metrics ────────────────────────────────────────────────────────
+rouge-score>=0.1.2
+bert-score>=0.3.13
+nltk>=3.8
+evaluate>=0.4
 
-# Evaluation
-bert-score
-evaluate
-rouge-score
+# ── Visualization ─────────────────────────────────────────────────────────────
+matplotlib>=3.7
+seaborn>=0.13
+opencv-python>=4.8
 
-# Visualization
-matplotlib
-seaborn
+# ── UI ────────────────────────────────────────────────────────────────────────
+gradio>=4.20
 
-# UI
-gradio
+# ── XAI (optional — placeholders exist if not installed) ─────────────────────
+# shap>=0.44
+# lime>=0.2
+# captum>=0.7
 
-# Utilities
-scikit-learn
-scipy
+# ── Testing ───────────────────────────────────────────────────────────────────
+pytest>=7.4

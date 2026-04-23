@@ -14,7 +14,15 @@ Usage:
 
 import os
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Optional
+
+try:
+    from dotenv import load_dotenv
+    _ROOT = Path(__file__).resolve().parent.parent
+    load_dotenv(dotenv_path=str(_ROOT / ".env"), override=False)
+except Exception:
+    pass
 
 
 # ---------------------------------------------------------------------------
@@ -167,7 +175,7 @@ class Settings:
     # ------------------------------------------------------------------
     GEMINI_MODEL: str = field(
         default_factory=lambda: _env(
-            "GEMINI_MODEL", "gemini-1.5-flash"
+            "GEMINI_MODEL", "gemini-2.0-flash"
         )
     )
     GEMINI_API_KEY: Optional[str] = field(

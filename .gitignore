@@ -3,10 +3,33 @@ __pycache__/
 *.pyc
 *.pyo
 *.pyd
+*.so
+.Python
+
+# Packaging / build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+pip-wheel-metadata/
 
 # Virtual environments
 venv/
 env/
+xai_env/
+.venv/
+
+# Model cache (can be GBs — never commit)
+.model_cache/
+
+# Python tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
 
 # OS files
 .DS_Store
@@ -20,12 +43,17 @@ data/tables/
 data/embeddings/
 data/summaries/
 data/xai_outputs/
+data/evaluation/results/
+data/evaluation/reports/
 
 # Logs
 *.log
+logs/
 
 # Jupyter
 .ipynb_checkpoints/
 
-# Secrets
-.env
+# IDE/editor
+.vscode/
+.idea/
+

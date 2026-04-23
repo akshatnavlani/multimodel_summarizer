@@ -13,6 +13,7 @@ CRITICAL FIXES:
 
 import json
 import logging
+import os
 import time
 from pathlib import Path
 from typing import Any, Dict, List
@@ -234,9 +235,22 @@ def _patch_layout() -> None:
 # Main pipeline
 # ---------------------------------------------------------------------------
 
+def _has_embedding_cache(pdf_path: str) -> bool:
+    """Return True if a valid embedding cache exists for this PDF."""
+    try:
+        from config.paths import get_project_paths
+        from src.ingestion.pdf_loader import generate_paper_id
+        paths = get_project_paths(create_dirs=False)
+        emb_dir = paths["embeddings"]
+        paper_id = generate_paper_id(pdf_path)
+        return (emb_dir / f"{paper_id}_embeddings.pkl").exists()
+    except Exception:
+        return False
+
+
 def run_pipeline(
     pdf_path:           str,
-    query:              str  = "Summarize the key contributions and results",
+    query:              str  = "Analyze this research paper",
     force_reprocess:    bool = False,
     top_k:              int  = 12,
     max_summary_words:  int  = 800,
@@ -248,6 +262,12 @@ def run_pipeline(
     """
     t0 = time.time()
     st: Dict[str, float] = {}
+
+    # Auto-detect new PDFs: if no embedding cache exists, always reprocess
+    if not force_reprocess and not _has_embedding_cache(pdf_path):
+        logger.info("[pipeline] No embedding cache found for %s — auto force_reprocess=True.",
+                    Path(pdf_path).name)
+        force_reprocess = True
 
     print(f"\n{'='*55}")
     print(f"  PDF: {Path(pdf_path).name}")
@@ -289,7 +309,7 @@ def run_pipeline(
         _validate(txt, "Text")
         st["text_extraction"] = round(time.time() - t, 3)
         tm     = txt.get("metadata", {})
-        chunks = tm.get("text_chunks") or tm.get("chunks") or []
+        chunks = txt.get("text_chunks") or tm.get("text_chunks") or tm.get("chunks") or []
         _log(3, "Text", st["text_extraction"], f"chunks={len(chunks)}")
 
         # 3b — Tables
@@ -313,29 +333,67 @@ def run_pipeline(
         fig_list: List[Dict] = []
         st["figure_understanding"] = 0.0
         st["chart_extraction"]     = 0.0
+        vision_warning = ""
 
         if not skip_vision:
-            # Full BLIP-2 path
-            t = time.time()
-            fig_r = mods["describe_figures"](ing, lay,
-                        force_reprocess=force_reprocess, batch_size=2)
-            _validate(fig_r, "Figures")
-            st["figure_understanding"] = round(time.time() - t, 3)
-            fig_list = fig_r.get("metadata", {}).get("figures", [])
-            _log(5, "Figures (BLIP-2)", st["figure_understanding"],
-                 f"figures={len(fig_list)}")
+            try:
+                # Full BLIP-2 path (batch defaults tuned for low-VRAM consumer GPUs)
+                blip_batch = max(1, int(os.environ.get("BLIP2_BATCH_SIZE", "1")))
+                deplot_batch = max(1, int(os.environ.get("DEPLOT_BATCH_SIZE", "1")))
 
-            t = time.time()
-            cht_r = mods["extract_charts"](ing, lay, figure_result=fig_r,
-                        force_reprocess=force_reprocess, batch_size=1)
-            _validate(cht_r, "Charts")
-            st["chart_extraction"] = round(time.time() - t, 3)
-            chart_fig_list = cht_r.get("metadata", {}).get("charts", [])
-            _log(6, "Charts (Deplot)", st["chart_extraction"],
-                 f"charts={len(chart_fig_list)}")
+                t = time.time()
+                fig_r = mods["describe_figures"](
+                    ing,
+                    lay,
+                    force_reprocess=force_reprocess,
+                    batch_size=blip_batch,
+                )
+                _validate(fig_r, "Figures")
+                st["figure_understanding"] = round(time.time() - t, 3)
+                fig_list = fig_r.get("metadata", {}).get("figures", [])
+                _log(5, "Figures (BLIP-2)", st["figure_understanding"],
+                     f"figures={len(fig_list)} | batch={blip_batch}")
 
-            figure_data = fig_r
-            chart_data  = cht_r
+                t = time.time()
+                cht_r = mods["extract_charts"](
+                    ing,
+                    lay,
+                    figure_result=fig_r,
+                    force_reprocess=force_reprocess,
+                    batch_size=deplot_batch,
+                    use_vqa_fallback=False,
+                )
+                _validate(cht_r, "Charts")
+                st["chart_extraction"] = round(time.time() - t, 3)
+                chart_fig_list = cht_r.get("metadata", {}).get("charts", [])
+                _log(6, "Charts (Deplot)", st["chart_extraction"],
+                     f"charts={len(chart_fig_list)} | batch={deplot_batch}")
+
+                figure_data = fig_r
+                chart_data  = cht_r
+            except Exception as vision_exc:
+                vision_warning = str(vision_exc)
+                logger.warning(
+                    "[pipeline] Vision path failed; using lightweight figure context fallback: %s",
+                    vision_warning,
+                )
+
+                figure_elements = [e for e in elements if e.get("type") == "figure"]
+                t = time.time()
+                fig_list = _extract_figure_context(pdf_path, figure_elements, max_figures=8)
+                st["figure_understanding"] = round(time.time() - t, 3)
+                st["chart_extraction"] = 0.0
+                _log(5, "Figures (PyMuPDF text fallback)", st["figure_understanding"],
+                     f"figures={len(fig_list)}")
+
+                figure_data = {
+                    "status": "success",
+                    "metadata": {"figures": fig_list, "total_figures": len(fig_list)},
+                }
+                chart_data = {
+                    "status": "success",
+                    "metadata": {"charts": [], "total_charts": 0},
+                }
         else:
             # Lightweight: extract text near figure bboxes — INSTANT, no model
             figure_elements = [e for e in elements if e.get("type") == "figure"]
@@ -378,10 +436,59 @@ def run_pipeline(
         _log(8, "Retrieval", st["retrieval"],
              f"hits={len(ret.get('top_k_results', []))}")
 
-        # Enrich retrieval result
+        # Enrich retrieval result with raw figures and tables
         ret["figures"]  = fig_list
         ret["tables"]   = tables
         ret["paper_id"] = paper_id
+        ret["all_chunks"] = emb.get("metadata", {}).get("chunks") or emb.get("metadata", {}).get("text_chunks") or []
+
+        # Inject figure captions and table summaries into top_k_results
+        # so the LLM prompt and XAI explainer can attribute them correctly
+        injected = list(ret.get("top_k_results", []))
+        existing_ids = {c.get("chunk_id", "") for c in injected}
+
+        for i, fig in enumerate(fig_list, 1):
+            cap = str(fig.get("caption", "")).strip()
+            if not cap or cap.startswith("[captioning failed"):
+                continue
+            fig_id = fig.get("figure_id", fig.get("element_id", f"fig_{i:04d}"))
+            cid = f"{fig_id}_caption"
+            if cid not in existing_ids:
+                injected.append({
+                    "chunk_id":    cid,
+                    "text":        f"Figure {i}: {cap}",
+                    "modality":    "figure",
+                    "type":        "figure",
+                    "source_id":   fig_id,
+                    "page":        fig.get("page", -1),
+                    "score":       0.5,  # use neutral score for injected chunks
+                })
+                existing_ids.add(cid)
+
+        for i, tbl in enumerate(tables, 1):
+            sm = str(tbl.get("summary", tbl.get("markdown", ""))).strip()
+            if not sm:
+                continue
+            tbl_id = tbl.get("table_id", f"tbl_{i:04d}")
+            cid = f"{tbl_id}_summary"
+            if cid not in existing_ids:
+                injected.append({
+                    "chunk_id":    cid,
+                    "text":        f"Table {i}: {sm[:400]}",
+                    "modality":    "table",
+                    "type":        "table",
+                    "source_id":   tbl_id,
+                    "page":        tbl.get("page", -1),
+                    "score":       0.5,
+                })
+                existing_ids.add(cid)
+
+        ret["top_k_results"] = injected
+        logger.info("[pipeline] top_k_results enriched: %d total (%d text, %d figures, %d tables).",
+                    len(injected),
+                    sum(1 for c in injected if c.get("modality") == "text"),
+                    sum(1 for c in injected if c.get("modality") == "figure"),
+                    sum(1 for c in injected if c.get("modality") == "table"))
 
         # 7 — Summarization (auto-detect stale cache)
         summ_force = force_reprocess or _summary_is_stale(paper_id)
@@ -427,6 +534,8 @@ def run_pipeline(
                 "stage_times":    st,
                 "model_used":     sm.get("model_used", "unknown"),
                 "summary_words":  len(summ.get("summary", "").split()),
+                "vision_warning": vision_warning[:300] if vision_warning else "",
+                "vision_mode": "lightweight-fallback" if vision_warning else ("lightweight" if skip_vision else "full"),
             },
         }
 

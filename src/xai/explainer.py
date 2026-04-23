@@ -248,22 +248,76 @@ def _extract_chunks_from_retrieval(
     """
     Build a flat list of chunk dicts from the retrieval result.
 
+    Reads from three sources:
+      1. top_k_results — FAISS-retrieved chunks (may already include figure/table chunks)
+      2. retrieval_result["figures"] — figure captions injected by the pipeline
+      3. retrieval_result["tables"]  — table summaries injected by the pipeline
+
     Each chunk has: text, source_type, source_id, page.
     """
     chunks = []
+    seen_ids: set = set()
+
+    # 1. FAISS-retrieved chunks (text, and any embedded fig/table chunks)
     for item in retrieval_result.get("top_k_results", []):
         text = str(item.get("text", "")).strip()
         if not text:
             continue
+        cid = item.get("chunk_id", "")
+        if cid in seen_ids:
+            continue
+        seen_ids.add(cid)
         chunks.append({
             "text":        text,
             "source_type": _normalise_source_type(
                 item.get("modality", item.get("type", "text"))
             ),
-            "source_id":   item.get("source_id", item.get("chunk_id", "")),
+            "source_id":   item.get("source_id", cid),
             "page":        item.get("page", -1),
-            "chunk_id":    item.get("chunk_id", ""),
+            "chunk_id":    cid,
         })
+
+    # 2. Figure captions — always include even if not in top_k
+    for fig in retrieval_result.get("figures", []):
+        cap = str(fig.get("caption", "")).strip()
+        if not cap or cap.startswith("[captioning failed"):
+            continue
+        fig_id = fig.get("figure_id", fig.get("element_id", ""))
+        cid = f"{fig_id}_caption"
+        if cid in seen_ids:
+            continue
+        seen_ids.add(cid)
+        chunks.append({
+            "text":        f"Figure {fig_id}: {cap}",
+            "source_type": "figure",
+            "source_id":   fig_id,
+            "page":        fig.get("page", -1),
+            "chunk_id":    cid,
+        })
+
+    # 3. Table summaries — always include even if not in top_k
+    for tbl in retrieval_result.get("tables", []):
+        sm = str(tbl.get("summary", tbl.get("markdown", ""))).strip()
+        if not sm:
+            continue
+        tbl_id = tbl.get("table_id", "")
+        cid = f"{tbl_id}_summary"
+        if cid in seen_ids:
+            continue
+        seen_ids.add(cid)
+        chunks.append({
+            "text":        f"Table {tbl_id}: {sm}",
+            "source_type": "table",
+            "source_id":   tbl_id,
+            "page":        tbl.get("page", -1),
+            "chunk_id":    cid,
+        })
+
+    logger.info("[explainer] Attribution pool: %d chunks (%d from top_k, %d figures, %d tables).",
+                len(chunks),
+                len(retrieval_result.get("top_k_results", [])),
+                len(retrieval_result.get("figures", [])),
+                len(retrieval_result.get("tables", [])))
     return chunks
 
 
